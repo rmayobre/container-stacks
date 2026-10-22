@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 networks:
   proxy:
     name: proxy-network
@@ -6,12 +12,17 @@ networks:
       config:
         - subnet: 10.2.0.0/24
 
+  # Isolated network (no outside access) between Traefik and the Docker socket proxy.
+  socket-net:
+    internal: true
+
 services:
 
   # Wireguard Dashboard - used to manage wireguard clients/servers configurations.
   wgdashboard:
-    image: ghcr.io/wgdashboard/wgdashboard:latest
+    image: ghcr.io/wgdashboard/wgdashboard:${WGDASHBOARD_IMAGE_TAG:-v4.3.3}
     restart: unless-stopped
+    logging: *default-logging
     container_name: wgdashboard
     ports:
       - 10086:10086/tcp
@@ -22,27 +33,49 @@ services:
       - /opt/wgdashboard/data:/data
     cap_add:
       - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+
+  # Read-only, filtered access to the Docker API for Traefik, so Traefik never mounts the raw socket.
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:${SOCKET_PROXY_IMAGE_TAG:-v0.5.0}
+    container_name: socket-proxy
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      - CONTAINERS=1
+      - NETWORKS=1
+      - POST=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - socket-net
 
   # Reverse Proxy used to proxy secure traffic to internal services. Readily configured for Linode DNS challenges.
   traefik:
-    image: traefik:v3
+    image: traefik:${TRAEFIK_IMAGE_TAG:-v3}
     container_name: traefik
     restart: unless-stopped
+    logging: *default-logging
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - /opt/traefik/certs:/letsencrypt
       - /opt/traefik/logs:/var/log/
       - /opt/traefik/sconfig/config.yml:/config.yml:ro
       - /opt/traefik/endpoints:/dynamic
+    depends_on:
+      socket-proxy:
+        condition: service_started
     networks:
       proxy:
         ipv4_address: 10.2.0.3
+      socket-net:
     ports:
       - 80:80
       - 389:389
       - 443:443
     environment:
-      - LINODE_TOKEN=${TRAEFIK_LINODE_TOKEN}
+      - LINODE_TOKEN=${TRAEFIK_LINODE_TOKEN:?Set TRAEFIK_LINODE_TOKEN in .env}
     labels:
       - traefik.docker.network=proxy-network
       - traefik.enable=true
@@ -51,6 +84,12 @@ services:
       - traefik.http.routers.traefik.tls=true
       - traefik.http.routers.traefik.tls.certresolver=letsencrypt
       - traefik.http.routers.traefik.service=api@internal
+    healthcheck:
+      test: [ "CMD", "traefik", "healthcheck", "--ping" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     command:
       # Globals
       - --api.dashboard=true
@@ -79,8 +118,11 @@ services:
       - --log.format=common
       - --log.level=ERROR
       - --log.filepath=/var/log/traefik.log
+      # Health endpoint used by the container healthcheck
+      - --ping=true
       # Docker Provider
       - --providers.docker=true
+      - --providers.docker.endpoint=tcp://socket-proxy:2375
       - --providers.docker.exposedbydefault=false
       - --providers.docker.network=proxy-network
       # File Provider
@@ -93,7 +135,7 @@ services:
   dns-server:
     container_name: dns-server
     hostname: ${DNS_SERVER_HOST}
-    image: technitium/dns-server:latest
+    image: technitium/dns-server:${TECHNITIUM_IMAGE_TAG:-15.6.2}
     labels:
       - traefik.docker.network=proxy-network
       - traefik.enable=true
@@ -118,7 +160,7 @@ services:
       # - "67:67/udp" #DHCP service
     environment:
       - DNS_SERVER_DOMAIN=${DNS_SERVER_HOST} #The primary domain name used by this DNS Server to identify itself.
-      - DNS_SERVER_ADMIN_PASSWORD=${DNS_ADMIN_PASSWORD} #DNS web console admin user password.
+      - DNS_SERVER_ADMIN_PASSWORD=${DNS_ADMIN_PASSWORD:?Set DNS_ADMIN_PASSWORD in .env} #DNS web console admin user password.
       # - DNS_SERVER_ADMIN_PASSWORD_FILE=password.txt #The path to a file that contains a plain text password for the DNS web console admin user.
       # - DNS_SERVER_PREFER_IPV6=false #DNS Server will use IPv6 for querying whenever possible with this option enabled.
       # - DNS_SERVER_WEB_SERVICE_LOCAL_ADDRESSES=172.17.0.1,127.0.0.1 #Comma separated list of network interface IP addresses that you want the web service to listen on for requests. The "172.17.0.1" address is the built-in Docker bridge. The "[::]" is the default value if not specified. Note! This must be used only with "host" network mode.
@@ -143,6 +185,7 @@ services:
     volumes:
       - /opt/technitium/dns:/etc/dns
     restart: unless-stopped
+    logging: *default-logging
     sysctls:
       - net.ipv4.ip_local_port_range=1024 65535
     networks:

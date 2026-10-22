@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 networks:
   proxy:
     name: proxy-network
@@ -11,14 +17,19 @@ networks:
 
 services:
   pocket-id:
-    image: ghcr.io/pocket-id/pocket-id:v2
+    image: ghcr.io/pocket-id/pocket-id:${POCKET_ID_IMAGE_TAG:-v2}
     restart: unless-stopped
-    env_file: .env
+    logging: *default-logging
     dns:
       - ${INTERNAL_DNS_IP}
       - 1.1.1.1
     environment:
-      - ENCRYPTION_KEY=${POCKET_ID_ENCRYPTION_KEY}
+      - ENCRYPTION_KEY=${POCKET_ID_ENCRYPTION_KEY:?Set POCKET_ID_ENCRYPTION_KEY in .env}
+      - APP_URL=${APP_URL:?Set APP_URL in .env}
+      - TRUST_PROXY=${TRUST_PROXY:-true}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      # Add MAXMIND_LICENSE_KEY here to enable GeoIP lookups (optional).
     expose:
       - 1411
     volumes:
@@ -43,16 +54,23 @@ services:
       - traefik.http.services.pocketid.loadbalancer.server.port=1411
 
   lldap:
-    image: lldap/lldap:stable
+    image: lldap/lldap:${LLDAP_IMAGE_TAG:-2026-09-22}
     restart: unless-stopped
+    logging: *default-logging
     environment:
       - TZ=${TZ}
-      - LLDAP_JWT_SECRET=${LLDAP_JWT_SECRET}
-      - LLDAP_KEY_SEED=${LLDAP_KEY_SEED}
-      - LLDAP_LDAP_BASE_DN=${LLDAP_LDAP_BASE_DN}
-      - LLDAP_LDAP_USER_PASS=${LLDAP_LDAP_USER_PASS}
+      - LLDAP_JWT_SECRET=${LLDAP_JWT_SECRET:?Set LLDAP_JWT_SECRET in .env}
+      - LLDAP_KEY_SEED=${LLDAP_KEY_SEED:?Set LLDAP_KEY_SEED in .env}
+      - LLDAP_LDAP_BASE_DN=${LLDAP_LDAP_BASE_DN:?Set LLDAP_LDAP_BASE_DN in .env}
+      - LLDAP_LDAP_USER_PASS=${LLDAP_LDAP_USER_PASS:?Set LLDAP_LDAP_USER_PASS in .env}
     volumes:
       - "/opt/lldap/data:/data"
+    healthcheck:
+      test: [ "CMD", "/app/lldap", "healthcheck", "--config-file", "/data/lldap_config.toml" ]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     expose:
       - 17170 # Web UI
       - 3890 # For LDAP, not recommended to expose, see Usage section.

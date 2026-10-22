@@ -5,6 +5,7 @@ The foundation stack. It provides the VPN, the reverse proxy, and internal DNS t
 | Service | Image | Purpose |
 |---|---|---|
 | `wgdashboard` | `ghcr.io/wgdashboard/wgdashboard` | Web UI for managing WireGuard / AmneziaWG servers and clients (UI on `10086`, VPN on `51820/udp`). |
+| `socket-proxy` | `tecnativa/docker-socket-proxy` | Read-only, filtered Docker API access for Traefik, so Traefik doesn't mount the raw Docker socket. |
 | `traefik` | `traefik:v3` | Reverse proxy with automatic wildcard Let's Encrypt certificates via the Linode DNS challenge. Ports `80`, `443`, and `389` (LDAP entrypoint for the authentication stack). |
 | `dns-server` | `technitium/dns-server` | Internal DNS server (port `53`), with optional ad blocking, so internal hostnames resolve to your services. |
 
@@ -33,6 +34,8 @@ Static addresses used on that network: `10.2.0.2` DNS, `10.2.0.3` Traefik, `10.2
    - `TRAEFIK_LINODE_TOKEN`: the Linode API token.
    - `DNS_SERVER_HOST`: hostname for the DNS server (also used as its container hostname).
    - `DNS_ADMIN_PASSWORD`: initial Technitium admin password.
+   - Image tag variables (`WGDASHBOARD_IMAGE_TAG`, `TRAEFIK_IMAGE_TAG`, `SOCKET_PROXY_IMAGE_TAG`, `TECHNITIUM_IMAGE_TAG`) are pre-filled with pinned versions. Upgrade by changing them and running `docker compose pull && docker compose up -d`.
+   - Blank required secrets make `docker compose` stop with a message naming the missing variable.
 2. `docker compose up -d`
 
 ## Follow-up configuration
@@ -72,7 +75,10 @@ Notes:
 
 ## Security notes
 
-- Traefik and the other stacks mount the Docker socket. Treat those containers as root-equivalent on the host.
+- Traefik reads container labels through `socket-proxy` (on an internal-only network) rather than mounting the Docker socket. The proxy itself mounts the socket read-only and only allows `containers` and `networks` GET requests. Not every container is protected this way: Komodo Periphery (management stack) still mounts the raw socket and is root-equivalent on the host.
+- Containers have log rotation (10 MB x 3 files) and Traefik has a healthcheck (`--ping`).
+- `wgdashboard` sets `net.ipv4.ip_forward=1` and `net.ipv4.conf.all.src_valid_mark=1` so it can route VPN traffic.
+- Review `socket-proxy` permissions if you add Traefik features that need more of the Docker API.
 - Never commit your `.env`.
 
 ## Official documentation

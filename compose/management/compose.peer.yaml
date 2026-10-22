@@ -1,19 +1,26 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   periphery:
     container_name: komodo-periphery
     environment:
-      PERIPHERY_DISABLE_TERMINALS: False
+      PERIPHERY_DISABLE_TERMINALS: ${PERIPHERY_DISABLE_TERMINALS:-true}
       PERIPHERY_INCLUDE_DISK_MOUNTS: /etc/hostname
-      PERIPHERY_ONBOARDING_KEY: ${PERIPHERY_ONBOARDING_KEY} # Key must also be provided to the core instance
+      PERIPHERY_ONBOARDING_KEY: ${PERIPHERY_ONBOARDING_KEY:?Set PERIPHERY_ONBOARDING_KEY in .env} # Key must also be provided to the core instance
       PERIPHERY_ROOT_DIRECTORY: /opt/komodo/periphery
-      PERIPHERY_SSL_ENABLED: True
-    image: ghcr.io/moghtech/komodo-periphery:2
+      PERIPHERY_SSL_ENABLED: true
+    image: ghcr.io/moghtech/komodo-periphery:${COMPOSE_KOMODO_IMAGE_TAG:-2}
     init: true
     labels:
       komodo.skip: Null
     ports:
       - '8120:8120'
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - /opt/komodo/keys:/config/keys
       - /var/run/docker.sock:/var/run/docker.sock

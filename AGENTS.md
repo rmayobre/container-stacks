@@ -16,7 +16,11 @@ Every stack directory must contain:
 - Compose files must reference such values as `${VARIABLE}`, and each variable must be declared in that stack's `template.env` with a blank value and a comment saying what it is and how to generate it.
 - Use `example.com` for example domains in docs and comments. Do not paste real credentials, even as "examples"; for generated values, document the command (e.g. `openssl rand -hex 32`).
 - Before finishing any change, grep the repo for leaked values (domains, IPs, passwords, tokens) and confirm every `${VAR}` used in a compose file exists in `template.env`.
-- Validate changes with `cp template.env .env && docker compose config -q`, then delete the `.env`.
+- Required secrets use `${VAR:?message}` in compose files so a blank value fails fast. Validation therefore needs placeholder values: `sed 's/=$/=x/' template.env > .env && docker compose config -q`, then delete the `.env`. With the blank template the command is expected to fail on the required variables.
+- Pin image tags (a version or major tag, never `latest` or no tag). Expose the tag as a non-secret variable with a default, e.g. `image: traefik:${TRAEFIK_IMAGE_TAG:-v3}`, and list it in `template.env` with that same value.
+- Pass containers only the environment they need; avoid `env_file: .env` where an explicit `environment:` block works.
+- Give each service log rotation (`logging: *default-logging`) and a healthcheck where the image supports one.
+- Prefer a filtered Docker socket proxy over mounting the raw socket where possible; document any container that still mounts it.
 
 ## README rules (per stack)
 

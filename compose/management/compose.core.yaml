@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 ################################
 # 🦎 KOMODO COMPOSE - MONGO 🦎 #
 ################################
@@ -17,24 +23,30 @@ networks:
 services:
   mongo:
     container_name: mongo-db
-    image: mongo
+    image: mongo:${MONGO_IMAGE_TAG:-8.0}
     labels:
       komodo.skip: # Prevent Komodo from stopping with StopAllContainers
     command: --quiet --wiredTigerCacheSizeGB 0.25
-    env_file: .env
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - komodo-net
     volumes:
       - ${MONGO_DB_DATA}:/data/db
       - ${MONGO_DB_CONFIG}:/data/configdb
+    healthcheck:
+      test: [ "CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${KOMODO_DB_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${KOMODO_DB_PASSWORD}
+      MONGO_INITDB_ROOT_USERNAME: ${KOMODO_DB_USERNAME:?Set KOMODO_DB_USERNAME in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${KOMODO_DB_PASSWORD:?Set KOMODO_DB_PASSWORD in .env}
 
   core:
     container_name: komodo-core
-    image: ghcr.io/moghtech/komodo-core:2
+    image: ghcr.io/moghtech/komodo-core:${COMPOSE_KOMODO_IMAGE_TAG:-2}
     init: true
     labels:
       - traefik.docker.network=proxy-network
@@ -46,20 +58,22 @@ services:
       - traefik.http.services.komodo.loadbalancer.server.port=9120
       - komodo.skip=true # Prevent Komodo from stopping with StopAllContainers
     restart: unless-stopped
+    logging: *default-logging
     dns:
       - ${INTERNAL_DNS_IP}
       - 1.1.1.1
     depends_on:
       - mongo
-    ports:
-      - 9120:9120
-    #expose:
-    #  - 9120
+    # Reached through Traefik only. Publish the port instead if you need direct access:
+    # ports:
+    #   - 9120:9120
+    expose:
+      - 9120
     env_file: .env
     environment:
       KOMODO_DATABASE_ADDRESS: mongo:27017
-      KOMODO_DATABASE_USERNAME: ${KOMODO_DB_USERNAME}
-      KOMODO_DATABASE_PASSWORD: ${KOMODO_DB_PASSWORD}
+      KOMODO_DATABASE_USERNAME: ${KOMODO_DB_USERNAME:?Set KOMODO_DB_USERNAME in .env}
+      KOMODO_DATABASE_PASSWORD: ${KOMODO_DB_PASSWORD:?Set KOMODO_DB_PASSWORD in .env}
     networks:
       komodo-net:
       proxy:
@@ -82,7 +96,7 @@ services:
   ## https://github.com/moghtech/komodo/tree/main/scripts
   periphery:
     container_name: komodo-periphery
-    image: ghcr.io/moghtech/komodo-periphery:2
+    image: ghcr.io/moghtech/komodo-periphery:${COMPOSE_KOMODO_IMAGE_TAG:-2}
     init: true
     networks:
       - komodo-net
@@ -94,7 +108,15 @@ services:
     labels:
       komodo.skip: # Prevent Komodo from stopping with StopAllContainers
     restart: unless-stopped
-    env_file: .env
+    logging: *default-logging
+    environment:
+      PERIPHERY_ROOT_DIRECTORY: ${PERIPHERY_ROOT_DIRECTORY:?Set PERIPHERY_ROOT_DIRECTORY in .env}
+      PERIPHERY_PASSKEYS: ${KOMODO_PASSKEY:?Set KOMODO_PASSKEY in .env}
+      PERIPHERY_DISABLE_TERMINALS: ${PERIPHERY_DISABLE_TERMINALS:-true}
+      PERIPHERY_SSL_ENABLED: ${PERIPHERY_SSL_ENABLED:-true}
+      PERIPHERY_INCLUDE_DISK_MOUNTS: ${PERIPHERY_INCLUDE_DISK_MOUNTS:-/etc/hostname}
+      PERIPHERY_LOGGING_PRETTY: ${PERIPHERY_LOGGING_PRETTY:-true}
+      PERIPHERY_PRETTY_STARTUP_CONFIG: ${PERIPHERY_PRETTY_STARTUP_CONFIG:-true}
     volumes:
       - /opt/komodo/keys:/config/keys
       ## Mount external docker socket - TODO use docker socket proxy

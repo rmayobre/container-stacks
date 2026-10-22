@@ -23,6 +23,7 @@ Single sign-on and user directory.
    - `POCKET_ID_ENCRYPTION_KEY`: the Pocket ID encryption key. Back it up; losing it makes the stored data unreadable.
    - `APP_URL`: full public URL of Pocket ID, e.g. `https://auth.example.com`.
    - `TRUST_PROXY=true` (leave it, since Traefik fronts the service), optionally `MAXMIND_LICENSE_KEY`, `PUID`, `PGID`.
+   - `POCKET_ID_IMAGE_TAG` and `LLDAP_IMAGE_TAG` are pre-filled with pinned versions; change them to upgrade deliberately.
    - `TZ`, `LLDAP_JWT_SECRET`, `LLDAP_KEY_SEED`, `LLDAP_LDAP_BASE_DN` (e.g. `dc=example,dc=com`), and `LLDAP_LDAP_USER_PASS` (password for the LLDAP `admin` user).
 2. `docker compose up -d`
 
@@ -34,6 +35,10 @@ Single sign-on and user directory.
 - LLDAP uses its default SQLite database in `/data`. To use MySQL/MariaDB/PostgreSQL instead, set `LLDAP_DATABASE_URL`.
 
 ## Notes
+
+- Each service only receives the variables listed in `compose.yaml` (no blanket `env_file`). To enable Pocket ID's GeoIP lookups, add `MAXMIND_LICENSE_KEY` to its `environment:` block.
+- Required secrets (`POCKET_ID_ENCRYPTION_KEY`, `APP_URL`, the `LLDAP_*` secrets) stop `docker compose` with a clear message if left blank.
+- The `lldap` healthcheck assumes the config file at `/data/lldap_config.toml`; check `docker compose ps` and adjust if it reports unhealthy.
 
 - The raw LDAP route uses `HostSNI(`*`)` on the `ldap` entrypoint (port 389 on Traefik) with no TLS; restrict it to your internal network.
 - `ldap-net` (`10.10.0.0/16`) is a bridge network that only `lldap` currently joins; other containers that need LDAP can attach to it. Adjust the subnet if it conflicts with your network.
