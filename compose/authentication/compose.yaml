@@ -1,0 +1,78 @@
+networks:
+  proxy:
+    name: proxy-network
+    external: true
+  ldap-net:
+    name: ldap-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.0.0/16
+
+services:
+  pocket-id:
+    image: ghcr.io/pocket-id/pocket-id:v2
+    restart: unless-stopped
+    env_file: .env
+    dns:
+      - ${INTERNAL_DNS_IP}
+      - 1.1.1.1
+    environment:
+      - ENCRYPTION_KEY=${POCKET_ID_ENCRYPTION_KEY}
+    expose:
+      - 1411
+    volumes:
+      - "/opt/pocketid/data:/app/data"
+    # Optional healthcheck
+    healthcheck:
+      test: [ "CMD", "/app/pocket-id", "healthcheck" ]
+      interval: 1m30s
+      timeout: 5s
+      retries: 2
+      start_period: 10s
+    networks:
+      proxy:
+        ipv4_address: 10.2.0.4
+    labels:
+      - traefik.docker.network=proxy-network
+      - traefik.enable=true
+      - traefik.http.routers.oidc.entrypoints=websecure
+      - traefik.http.routers.oidc.rule=Host(`${POCKET_ID_HOST}`)
+      - traefik.http.routers.oidc.tls=true
+      - traefik.http.routers.oidc.tls.certresolver=letsencrypt
+      - traefik.http.services.pocketid.loadbalancer.server.port=1411
+
+  lldap:
+    image: lldap/lldap:stable
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      - LLDAP_JWT_SECRET=${LLDAP_JWT_SECRET}
+      - LLDAP_KEY_SEED=${LLDAP_KEY_SEED}
+      - LLDAP_LDAP_BASE_DN=${LLDAP_LDAP_BASE_DN}
+      - LLDAP_LDAP_USER_PASS=${LLDAP_LDAP_USER_PASS}
+    volumes:
+      - "/opt/lldap/data:/data"
+    expose:
+      - 17170 # Web UI
+      - 3890 # For LDAP, not recommended to expose, see Usage section.
+      - 6360 # For LDAPS (LDAP Over SSL), enable port if LLDAP_LDAPS_OPTIONS__ENABLED set true, look env below
+    networks:
+      proxy:
+        ipv4_address: 10.2.0.6
+      ldap-net:
+    labels:
+      - traefik.docker.network=proxy-network
+      - traefik.enable=true
+
+       # --- Web UI (HTTP/HTTPS) ---
+      - traefik.http.routers.account.entrypoints=websecure
+      - traefik.http.routers.account.rule=Host(`${LLDAP_HOST}`)
+      - traefik.http.routers.account.tls=true
+      - traefik.http.routers.account.tls.certresolver=letsencrypt
+      - traefik.http.services.lldap.loadbalancer.server.port=17170
+
+      # --- Raw LDAP protocol (TCP passthrough) ---
+      - traefik.tcp.routers.account.rule=HostSNI(`*`)
+      - traefik.tcp.routers.account.entrypoints=ldap
+      - traefik.tcp.services.lldap.loadbalancer.server.port=3890

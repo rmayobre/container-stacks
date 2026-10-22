@@ -1,0 +1,21 @@
+services:
+  periphery:
+    container_name: komodo-periphery
+    environment:
+      PERIPHERY_DISABLE_TERMINALS: False
+      PERIPHERY_INCLUDE_DISK_MOUNTS: /etc/hostname
+      PERIPHERY_ONBOARDING_KEY: ${PERIPHERY_ONBOARDING_KEY} # Key must also be provided to the core instance
+      PERIPHERY_ROOT_DIRECTORY: /opt/komodo/periphery
+      PERIPHERY_SSL_ENABLED: True
+    image: ghcr.io/moghtech/komodo-periphery:2
+    init: true
+    labels:
+      komodo.skip: Null
+    ports:
+      - '8120:8120'
+    restart: unless-stopped
+    volumes:
+      - /opt/komodo/keys:/config/keys
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/proc
+      - /opt/komodo/periphery:/opt/komodo/periphery

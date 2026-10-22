@@ -1,0 +1,4 @@
+# Local environment files contain secrets; only template.env is tracked
+.env
+**/.env
+!template.env
